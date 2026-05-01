@@ -31,6 +31,10 @@ python3 src/SAT1.py benchmarks/file.cnf.Z
 Run ALL benchmarks:
 python3 src/run_all.py benchmarks/
 
+Resume/continue an interrupted run:
+python3 src/run_all.py benchmarks/ --resume
+python3 src/run_all.py benchmarks/ --continue
+
 ---
 
 ## Plot Results

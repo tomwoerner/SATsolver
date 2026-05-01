@@ -4,7 +4,8 @@ FINAL run_all.py (fixed)
 
 - Handles timeouts properly
 - Logs to ONE summary.csv (newest rows after header)
-- Adds timestamp, vars, clauses
+- Adds timestamp, index, vars, clauses
+- Supports --resume / --continue
 - Cross-platform
 """
 
@@ -56,20 +57,91 @@ def read_header(path):
     return "", ""
 
 
-SUMMARY_HEADER = ["timestamp","file","vars","clauses","result","time_ms"]
+SUMMARY_HEADER = ["timestamp","index","file","vars","clauses","result","time_ms"]
+
+
+def trim_trailing_empty_columns(row):
+    row = list(row)
+    while row and row[-1] == "":
+        row.pop()
+    return row
+
+
+def normalize_summary_row(row):
+    row = trim_trailing_empty_columns(row)
+
+    if len(row) == 6:
+        row = [row[0], "", row[1], row[2], row[3], row[4], row[5]]
+
+    if len(row) < len(SUMMARY_HEADER):
+        row = row + [""] * (len(SUMMARY_HEADER) - len(row))
+
+    return row[:len(SUMMARY_HEADER)]
+
+
+def read_summary_rows(csv_path):
+    if not csv_path.exists():
+        return []
+
+    with open(csv_path, "r", newline="", encoding="utf-8") as f:
+        rows = list(csv.reader(f))
+
+    if not rows:
+        return []
+
+    header = trim_trailing_empty_columns(rows[0])
+    data_rows = rows[1:] if header and header[0] == "timestamp" else rows
+
+    return [normalize_summary_row(row) for row in data_rows if trim_trailing_empty_columns(row)]
+
+
+def parse_index_value(index_value):
+    if "/" not in index_value:
+        return None
+
+    current, total = index_value.split("/", 1)
+    try:
+        return int(current), int(total)
+    except ValueError:
+        return None
+
+
+def get_resume_state(csv_path, total_files):
+    rows = read_summary_rows(csv_path)
+    completed_files = set()
+
+    if not rows:
+        return 1, completed_files
+
+    top_index = parse_index_value(rows[0][1])
+    if top_index is None:
+        return 1, completed_files
+
+    top_current, top_total = top_index
+    if top_total != total_files:
+        return 1, completed_files
+
+    expected_index = top_current
+
+    for row in rows:
+        index_value = row[1]
+        parsed_index = parse_index_value(index_value)
+
+        if parsed_index is None:
+            break
+
+        current, total = parsed_index
+        if total != total_files or current != expected_index:
+            break
+
+        completed_files.add(row[2])
+        expected_index -= 1
+
+    return min(top_current + 1, total_files + 1), completed_files
 
 
 def write_summary_row(csv_path, row):
-    existing_rows = []
-
-    if csv_path.exists():
-        with open(csv_path, "r", newline="", encoding="utf-8") as f:
-            reader = csv.reader(f)
-            rows = list(reader)
-            if rows and rows[0] == SUMMARY_HEADER:
-                existing_rows = rows[1:]
-            else:
-                existing_rows = rows
+    existing_rows = read_summary_rows(csv_path)
 
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
@@ -79,11 +151,20 @@ def write_summary_row(csv_path, row):
 
 
 def main():
-    if len(sys.argv) != 2:
-        print("Usage: python3 src/run_all.py benchmarks/")
+    resume = False
+
+    if len(sys.argv) not in (2, 3):
+        print("Usage: python3 src/run_all.py benchmarks/ [--resume|--continue]")
         return
 
     bench_dir = Path(sys.argv[1])
+
+    if len(sys.argv) == 3:
+        if sys.argv[2] not in ("--resume", "--continue"):
+            print("Usage: python3 src/run_all.py benchmarks/ [--resume|--continue]")
+            return
+        resume = True
+
     BASE = Path(__file__).resolve().parent.parent
     results_dir = BASE / "results"
     results_dir.mkdir(exist_ok=True)
@@ -98,7 +179,22 @@ def main():
 
     print(f"Found {len(files)} files")
 
-    for i, file in enumerate(files, 1):
+    start_index = 1
+    completed_files = set()
+    if resume:
+        start_index, completed_files = get_resume_state(csv_path, len(files))
+        if start_index > len(files):
+            print("Resume requested: all benchmarks already completed")
+            print("DONE")
+            return
+        print(f"Resume requested: starting at {start_index}/{len(files)}")
+        print(f"Resume requested: skipping {len(completed_files)} completed file(s)")
+
+    for i, file in enumerate(files[start_index - 1:], start_index):
+        if file.name in completed_files:
+            print(f"[{i}/{len(files)}] {file.name} already completed, skipping", flush=True)
+            continue
+
         print(f"[{i}/{len(files)}] {file.name}...", flush=True)
 
         vars_, clauses_ = read_header(file)
@@ -137,6 +233,7 @@ def main():
 
         write_summary_row(csv_path, [
             datetime.now().isoformat(timespec="seconds"),
+            f"{i}/{len(files)}",
             file.name,
             vars_,
             clauses_,
