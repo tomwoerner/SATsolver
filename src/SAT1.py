@@ -43,49 +43,33 @@ def lit_sign_value(lit: int) -> int:
 def negate(lit: int) -> int:
     return -lit
 
-def open_cnf_file(path: Path):
-    import subprocess
-    import tempfile
-    import shutil
 
-    if path.suffix.lower() != ".z":
+def open_cnf_file(path: Path):
+    import gzip
+    import tempfile
+
+    if path.suffix.lower() == ".cnf":
         return path.open("r", encoding="utf-8", errors="replace")
 
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".cnf")
-    tmp_path = Path(tmp.name)
-    tmp.close()
+    if path.suffix.lower() == ".gz":
+        return gzip.open(path, "rt", encoding="utf-8", errors="replace")
 
-    def try_command(cmd):
+    if path.suffix.lower() == ".z":
         try:
-            with open(tmp_path, "wb") as out:
-                result = subprocess.run(
-                    cmd,
-                    stdout=out,
-                    stderr=subprocess.PIPE,
-                    shell=True  # <-- IMPORTANT for Windows
-                )
-            return result.returncode == 0
-        except Exception:
-            return False
+            from unlzw3 import unlzw
+        except ImportError:
+            raise RuntimeError("pip install unlzw3")
 
-    # Try different tools
-    if try_command(f'gzip -d -c "{path}"'):
-        return tmp_path.open("r", encoding="utf-8", errors="replace")
+        with open(path, "rb") as f:
+            data = unlzw(f.read())
 
-    if try_command(f'uncompress -c "{path}"'):
-        return tmp_path.open("r", encoding="utf-8", errors="replace")
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".cnf")
+        tmp.write(data)
+        tmp.close()
 
-    # 🔥 FORCE full path to 7z (this is the fix)
-    seven_zip = shutil.which("7z") or r"C:\Program Files\7-Zip\7z.exe"
+        return Path(tmp.name).open("r", encoding="utf-8", errors="replace")
 
-    if try_command(f'"{seven_zip}" e -so "{path}"'):
-        return tmp_path.open("r", encoding="utf-8", errors="replace")
-
-    raise RuntimeError(
-        f"Cannot decompress .Z file.\nTried gzip, uncompress, and 7z.\n"
-        f"Make sure 7z is installed at: {seven_zip}"
-    )
-
+    raise ValueError(f"Unsupported file type: {path}")
 
 def parse_dimacs_cnf(path: str | Path):
     path = Path(path)
