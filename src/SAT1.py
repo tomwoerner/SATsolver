@@ -115,9 +115,11 @@ def parse_dimacs_cnf(path: str | Path):
 
 
 class SATSolver:
-    def __init__(self, formula: CNFFormula):
+    def __init__(self, formula: CNFFormula, start_time: float, time_limit: int):
         self.n = formula.num_vars
         self.clauses: List[List[int]] = formula.clauses
+        self.start_time = start_time
+        self.time_limit = time_limit
 
         self.assignment: List[int] = [-1] * (self.n + 1)  # -1 unassigned, 0 false, 1 true
         self.level_of_var: List[int] = [-1] * (self.n + 1)
@@ -137,6 +139,12 @@ class SATSolver:
         self.backjumps = 0
 
         self._init_watch_structures()
+
+    def check_timeout(self):
+        import time
+
+        if time.time() - self.start_time > self.time_limit:
+            raise TimeoutError("Solver timeout")
 
     def _init_watch_structures(self) -> None:
         for ci, clause in enumerate(self.clauses):
@@ -180,6 +188,7 @@ class SATSolver:
 
     def propagate(self) -> Optional[int]:
         while self.prop_q < len(self.trail):
+            self.check_timeout()
             var, value, _level, _reason = self.trail[self.prop_q]
             self.prop_q += 1
             self.propagations += 1
@@ -251,6 +260,7 @@ class SATSolver:
         return None
 
     def choose_literal_dlis(self) -> Optional[int]:
+        self.check_timeout()
         scores: Dict[int, int] = {}
         for clause in self.clauses:
             if self.is_clause_satisfied(clause):
@@ -324,6 +334,7 @@ class SATSolver:
         return self._search()
 
     def _search(self) -> bool:
+        self.check_timeout()
         if self.all_assigned():
             return True
 
@@ -335,6 +346,7 @@ class SATSolver:
         parent_level = self.current_level
 
         for branch_lit in (decision_lit, -decision_lit):
+            self.check_timeout()
             self.current_level += 1
             self.trail_limits.append(len(self.trail))
 
@@ -376,14 +388,23 @@ def format_unsat_output() -> str:
 
 
 def main() -> int:
+    import time
+
+    START_TIME = time.time()
+    TIME_LIMIT = 15  # seconds
+
     if len(sys.argv) != 2:
         print("Usage: python3 SAT1.py benchmark.cnf", file=sys.stderr)
         return 1
 
     try:
         formula = parse_dimacs_cnf(sys.argv[1])
-        solver = SATSolver(formula)
-        sat = solver.solve()
+        solver = SATSolver(formula, START_TIME, TIME_LIMIT)
+        try:
+            sat = solver.solve()
+        except TimeoutError:
+            print("RESULT:TIMEOUT")
+            return 0
         if sat:
             print(format_sat_output(solver.final_assignment()))
         else:
