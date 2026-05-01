@@ -3,7 +3,7 @@
 FINAL run_all.py (fixed)
 
 - Handles timeouts properly
-- Logs to ONE summary.csv (append)
+- Logs to ONE summary.csv (newest rows after header)
 - Adds timestamp, vars, clauses
 - Cross-platform
 """
@@ -22,6 +22,12 @@ try:
 except:
     HAS_UNLZW = False
 
+def get_sat_timeout(sat1_path):
+    with open(sat1_path, "r", encoding="utf-8") as f:
+        for line in f:
+            if line.strip().startswith("TIME_LIMIT"):
+                return int(line.split("=")[1].strip())
+    raise RuntimeError("TIME_LIMIT not found in SAT1.py")
 
 def open_stream(path: Path):
     if path.suffix == ".cnf":
@@ -50,6 +56,28 @@ def read_header(path):
     return "", ""
 
 
+SUMMARY_HEADER = ["timestamp","file","vars","clauses","result","time_ms"]
+
+
+def write_summary_row(csv_path, row):
+    existing_rows = []
+
+    if csv_path.exists():
+        with open(csv_path, "r", newline="", encoding="utf-8") as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+            if rows and rows[0] == SUMMARY_HEADER:
+                existing_rows = rows[1:]
+            else:
+                existing_rows = rows
+
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(SUMMARY_HEADER)
+        writer.writerow(row)
+        writer.writerows(existing_rows)
+
+
 def main():
     if len(sys.argv) != 2:
         print("Usage: python3 src/run_all.py benchmarks/")
@@ -70,54 +98,53 @@ def main():
 
     print(f"Found {len(files)} files")
 
-    write_header = not csv_path.exists()
+    for i, file in enumerate(files, 1):
+        print(f"[{i}/{len(files)}] {file.name}...", flush=True)
 
-    with open(csv_path, "a", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
+        vars_, clauses_ = read_header(file)
 
-        if write_header:
-            writer.writerow(["timestamp","file","vars","clauses","result","time_ms"])
+        start = time.time()
 
-        for i, file in enumerate(files, 1):
-            print(f"[{i}/{len(files)}] {file.name}...", flush=True)
+        sat1_path = BASE / "src" / "SAT1.py"
+        TIME_LIMIT = get_sat_timeout(sat1_path)
+        SAFETY_MARGIN = 5
 
-            vars_, clauses_ = read_header(file)
+        try:
+            proc = subprocess.run(
+                [sys.executable, str(sat1_path), str(file)],
+                stdout=subprocess.PIPE,
+                stderr=None,
+                text=True,
+                timeout=TIME_LIMIT + SAFETY_MARGIN
+            )
 
-            start = time.time()
+            out = proc.stdout
 
-            try:
-                proc = subprocess.run(
-                    [sys.executable, str(BASE / "src" / "SAT1.py"), str(file)],
-                    capture_output=True,
-                    text=True,
-                    timeout=15
-                )
-                out = proc.stdout
-                if "RESULT:SAT" in out:
-                    result = "SAT"
-                elif "RESULT:UNSAT" in out:
-                    result = "UNSAT"
-                else:
-                    result = "UNKNOWN"
-
-            except subprocess.TimeoutExpired:
+            if "RESULT:SAT" in out:
+                result = "SAT"
+            elif "RESULT:UNSAT" in out:
+                result = "UNSAT"
+            elif "RESULT:TIMEOUT" in out:
                 result = "TIMEOUT"
-                out = ""
+            else:
+                result = "UNKNOWN"
 
-            elapsed = (time.time() - start) * 1000
+        except subprocess.TimeoutExpired:
+            result = "TIMEOUT"
+            out = ""
 
-            writer.writerow([
-                datetime.now().isoformat(timespec="seconds"),
-                file.name,
-                vars_,
-                clauses_,
-                result,
-                f"{elapsed:.2f}"
-            ])
+        elapsed = (time.time() - start) * 1000
 
-            f.flush()
+        write_summary_row(csv_path, [
+            datetime.now().isoformat(timespec="seconds"),
+            file.name,
+            vars_,
+            clauses_,
+            result,
+            f"{elapsed:.2f}"
+        ])
 
-            print(f"   -> {result} ({elapsed:.1f} ms)")
+        print(f"   -> {result} ({elapsed:.1f} ms)")
 
     print("DONE")
 

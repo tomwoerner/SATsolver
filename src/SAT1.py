@@ -22,12 +22,19 @@ or
 from __future__ import annotations
 
 import sys
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 import subprocess
 import tempfile
 from pathlib import Path
+
+TIME_LIMIT = 30
+SPINNER_CHARS = "/-\\|"
+SPINNER_INTERVAL = 0.20
+
 
 @dataclass
 class CNFFormula:
@@ -70,6 +77,43 @@ def open_cnf_file(path: Path):
         return Path(tmp.name).open("r", encoding="utf-8", errors="replace")
 
     raise ValueError(f"Unsupported file type: {path}")
+
+
+class Spinner:
+    def __init__(self, start_time: float, time_limit: int):
+        self.start_time = start_time
+        self.time_limit = time_limit
+        self.enabled = sys.stderr.isatty()
+        self.stop_event = threading.Event()
+        self.thread: Optional[threading.Thread] = None
+        self.last_line_length = 0
+
+    def start(self) -> None:
+        if not self.enabled:
+            return
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    def stop(self) -> None:
+        if not self.enabled:
+            return
+        self.stop_event.set()
+        if self.thread is not None:
+            self.thread.join()
+        print("\r" + " " * self.last_line_length + "\r", end="", file=sys.stderr, flush=True)
+
+    def _run(self) -> None:
+        index = 0
+        while not self.stop_event.is_set():
+            elapsed = time.time() - self.start_time
+            ch = SPINNER_CHARS[index % len(SPINNER_CHARS)]
+            index += 1
+            elapsed_seconds = min(int(elapsed), self.time_limit)
+            line = f"Solving {ch} {elapsed_seconds}s / {self.time_limit}s"
+            self.last_line_length = max(self.last_line_length, len(line))
+            print("\r" + line, end="", file=sys.stderr, flush=True)
+            self.stop_event.wait(SPINNER_INTERVAL)
+
 
 def parse_dimacs_cnf(path: str | Path):
     path = Path(path)
@@ -141,8 +185,6 @@ class SATSolver:
         self._init_watch_structures()
 
     def check_timeout(self):
-        import time
-
         if time.time() - self.start_time > self.time_limit:
             raise TimeoutError("Solver timeout")
 
@@ -388,29 +430,35 @@ def format_unsat_output() -> str:
 
 
 def main() -> int:
-    import time
-
     START_TIME = time.time()
-    TIME_LIMIT = 15  # seconds
+    spinner = Spinner(START_TIME, TIME_LIMIT)
 
     if len(sys.argv) != 2:
         print("Usage: python3 SAT1.py benchmark.cnf", file=sys.stderr)
         return 1
 
+    spinner.start()
     try:
         formula = parse_dimacs_cnf(sys.argv[1])
         solver = SATSolver(formula, START_TIME, TIME_LIMIT)
+
         try:
             sat = solver.solve()
         except TimeoutError:
+            spinner.stop()
             print("RESULT:TIMEOUT")
             return 0
+
+        spinner.stop()
+
         if sat:
             print(format_sat_output(solver.final_assignment()))
         else:
             print(format_unsat_output())
+
         return 0
     except Exception as exc:
+        spinner.stop()
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 
