@@ -23,6 +23,22 @@ try:
 except:
     HAS_UNLZW = False
 
+
+BASE = Path(__file__).resolve().parent.parent
+
+
+def project_python():
+    if sys.platform.startswith("win"):
+        candidate = BASE / "venv" / "Scripts" / "python.exe"
+    else:
+        candidate = BASE / "venv" / "bin" / "python"
+
+    if candidate.exists():
+        return str(candidate)
+
+    return sys.executable
+
+
 def get_sat_timeout(sat1_path, default=10):
     with open(sat1_path, "r", encoding="utf-8") as f:
         for line in f:
@@ -42,9 +58,22 @@ def open_stream(path: Path):
     if path.suffix == ".gz":
         return gzip.open(path, "rt", encoding="utf-8", errors="replace")
     if path.suffix.lower() == ".z":
-        if not HAS_UNLZW:
-            raise RuntimeError("pip install unlzw3")
-        data = unlzw(path.read_bytes())
+        if HAS_UNLZW:
+            data = unlzw(path.read_bytes())
+        else:
+            proc = subprocess.run(
+                [
+                    project_python(),
+                    "-c",
+                    "import sys; from unlzw3 import unlzw; sys.stdout.buffer.write(unlzw(open(sys.argv[1], 'rb').read()))",
+                    str(path),
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            if proc.returncode != 0:
+                raise RuntimeError("pip install unlzw3")
+            data = proc.stdout
         return data.decode("utf-8", errors="replace").splitlines()
     raise ValueError("Unsupported format")
 
@@ -193,7 +222,6 @@ def main():
             return
         resume = True
 
-    BASE = Path(__file__).resolve().parent.parent
     results_dir = BASE / "results"
     results_dir.mkdir(exist_ok=True)
 
@@ -235,7 +263,7 @@ def main():
 
         try:
             proc = subprocess.run(
-                [sys.executable, str(sat1_path), str(file)],
+                [project_python(), str(sat1_path), str(file)],
                 stdout=subprocess.PIPE,
                 stderr=None,
                 universal_newlines=True,

@@ -62,10 +62,31 @@ def open_cnf_file(path: Path):
         try:
             from unlzw3 import unlzw
         except ImportError:
-            raise RuntimeError("pip install unlzw3")
+            base = Path(__file__).resolve().parent.parent
+            if sys.platform.startswith("win"):
+                python_path = base / "venv" / "Scripts" / "python.exe"
+            else:
+                python_path = base / "venv" / "bin" / "python"
 
-        with open(path, "rb") as f:
-            data = unlzw(f.read())
+            if not python_path.exists():
+                raise RuntimeError("pip install unlzw3")
+
+            proc = subprocess.run(
+                [
+                    str(python_path),
+                    "-c",
+                    "import sys; from unlzw3 import unlzw; sys.stdout.buffer.write(unlzw(open(sys.argv[1], 'rb').read()))",
+                    str(path),
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            if proc.returncode != 0:
+                raise RuntimeError("pip install unlzw3")
+            data = proc.stdout
+        else:
+            with open(path, "rb") as f:
+                data = unlzw(f.read())
 
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".cnf")
         tmp.write(data)
