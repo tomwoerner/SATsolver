@@ -13,6 +13,7 @@ import sys
 import time
 import csv
 import subprocess
+import argparse
 from pathlib import Path
 from datetime import datetime
 import gzip
@@ -39,7 +40,7 @@ def project_python():
     return sys.executable
 
 
-def get_sat_timeout(sat1_path, default=10):
+def get_sat_timeout(sat1_path, default=30):
     with open(sat1_path, "r", encoding="utf-8") as f:
         for line in f:
             stripped = line.strip()
@@ -92,7 +93,9 @@ def read_header(path):
     return "", ""
 
 
-SUMMARY_HEADER = ["timestamp","index","file","vars","clauses","result","time_ms"]
+SAT_MODES = ("full", "baseline", "no_dlis", "no_backjump")
+RUN_ALL_MODES = SAT_MODES + ("all",)
+SUMMARY_HEADER = ["timestamp","index","file","vars","clauses","result","time_ms","mode"]
 
 
 def trim_trailing_empty_columns(row):
@@ -106,10 +109,15 @@ def normalize_summary_row(row):
     row = trim_trailing_empty_columns(row)
 
     if len(row) == 6:
-        row = [row[0], "", row[1], row[2], row[3], row[4], row[5]]
+        row = [row[0], "", row[1], row[2], row[3], row[4], row[5], "full"]
+    elif len(row) == 7:
+        row = row + ["full"]
 
     if len(row) < len(SUMMARY_HEADER):
         row = row + [""] * (len(SUMMARY_HEADER) - len(row))
+
+    if len(row) >= len(SUMMARY_HEADER) and row[7] == "":
+        row[7] = "full"
 
     return row[:len(SUMMARY_HEADER)]
 
@@ -141,9 +149,10 @@ def parse_index_value(index_value):
         return None
 
 
-def get_resume_state(csv_path, total_files):
+def get_resume_state(csv_path, total_files, mode):
     rows = read_summary_rows(csv_path)
     completed_files = set()
+    rows = [row for row in rows if row[7] == mode]
 
     if not rows:
         return 1, completed_files
@@ -175,8 +184,7 @@ def get_resume_state(csv_path, total_files):
     return min(top_current + 1, total_files + 1), completed_files
 
 
-def write_summary_row(csv_path, row, retries=5, retry_delay=1.0):
-    existing_rows = read_summary_rows(csv_path)
+def replace_summary_rows(csv_path, rows, retries=5, retry_delay=1.0):
     temp_path = csv_path.with_name(csv_path.name + ".tmp")
 
     for attempt in range(retries + 1):
@@ -184,8 +192,7 @@ def write_summary_row(csv_path, row, retries=5, retry_delay=1.0):
             with open(temp_path, "w", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
                 writer.writerow(SUMMARY_HEADER)
-                writer.writerow(row)
-                writer.writerows(existing_rows)
+                writer.writerows(rows)
             temp_path.replace(csv_path)
             return True
         except PermissionError:
@@ -207,42 +214,40 @@ def write_summary_row(csv_path, row, retries=5, retry_delay=1.0):
     return False
 
 
-def main():
-    resume = False
+def write_summary_row(csv_path, row):
+    existing_rows = read_summary_rows(csv_path)
+    return replace_summary_rows(csv_path, [row] + existing_rows)
 
-    if len(sys.argv) not in (2, 3):
-        print("Usage: python3 src/run_all.py benchmarks/ [--resume|--continue]")
-        return
 
-    bench_dir = Path(sys.argv[1])
+def ensure_summary_header(csv_path):
+    if not csv_path.exists():
+        return True
 
-    if len(sys.argv) == 3:
-        if sys.argv[2] not in ("--resume", "--continue"):
-            print("Usage: python3 src/run_all.py benchmarks/ [--resume|--continue]")
-            return
-        resume = True
+    with open(csv_path, "r", newline="", encoding="utf-8") as f:
+        rows = list(csv.reader(f))
 
-    results_dir = BASE / "results"
-    results_dir.mkdir(exist_ok=True)
+    if rows and trim_trailing_empty_columns(rows[0]) == SUMMARY_HEADER:
+        return True
 
-    csv_path = results_dir / "summary.csv"
+    return replace_summary_rows(csv_path, read_summary_rows(csv_path))
 
-    files = sorted(
-        list(bench_dir.glob("*.cnf")) +
-        list(bench_dir.glob("*.cnf.gz")) +
-        list(bench_dir.glob("*.cnf.Z"))
-    )
 
-    print(f"Found {len(files)} files")
+def parse_args(argv):
+    parser = argparse.ArgumentParser(description="Run SAT1.py over a benchmark directory")
+    parser.add_argument("benchmarks", help="benchmark directory")
+    parser.add_argument("--resume", "--continue", action="store_true", dest="resume")
+    parser.add_argument("--mode", choices=RUN_ALL_MODES, default="full")
+    return parser.parse_args(argv)
 
+
+def run_benchmarks_for_mode(files, csv_path, mode, resume):
     start_index = 1
     completed_files = set()
     if resume:
-        start_index, completed_files = get_resume_state(csv_path, len(files))
+        start_index, completed_files = get_resume_state(csv_path, len(files), mode)
         if start_index > len(files):
-            print("Resume requested: all benchmarks already completed")
-            print("DONE")
-            return
+            print(f"Resume requested: mode {mode} already completed")
+            return True
         print(f"Resume requested: starting at {start_index}/{len(files)}")
         print(f"Resume requested: skipping {len(completed_files)} completed file(s)")
 
@@ -262,8 +267,9 @@ def main():
         SAFETY_MARGIN = 5
 
         try:
+            cmd = [project_python(), str(sat1_path), str(file), "--mode", mode]
             proc = subprocess.run(
-                [project_python(), str(sat1_path), str(file)],
+                cmd,
                 stdout=subprocess.PIPE,
                 stderr=None,
                 universal_newlines=True,
@@ -294,14 +300,52 @@ def main():
             vars_,
             clauses_,
             result,
-            f"{elapsed:.2f}"
+            f"{elapsed:.2f}",
+            mode
         ])
 
         if not wrote_summary:
             print("Stopping so completed benchmark rows are not lost.")
-            return
+            return False
 
         print(f"   -> {result} ({elapsed:.1f} ms)")
+
+    return True
+
+
+def main():
+    args = parse_args(sys.argv[1:])
+    bench_dir = Path(args.benchmarks)
+
+    results_dir = BASE / "results"
+    results_dir.mkdir(exist_ok=True)
+
+    csv_path = results_dir / "summary.csv"
+    if not ensure_summary_header(csv_path):
+        print("Stopping because summary.csv could not be upgraded safely.")
+        return
+
+    files = sorted(
+        list(bench_dir.glob("*.cnf")) +
+        list(bench_dir.glob("*.cnf.gz")) +
+        list(bench_dir.glob("*.cnf.Z"))
+    )
+
+    print(f"Found {len(files)} files")
+    print(f"Mode: {args.mode}")
+
+    if args.mode == "all":
+        modes_to_run = SAT_MODES
+    else:
+        modes_to_run = (args.mode,)
+
+    for mode in modes_to_run:
+        if args.mode == "all":
+            print(f"=== Running mode: {mode} ===")
+
+        ok = run_benchmarks_for_mode(files, csv_path, mode, args.resume)
+        if not ok:
+            return
 
     print("DONE")
 

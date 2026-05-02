@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
 """
-Plot SAT/UNSAT results from the most recent in-progress or completed batch.
+Plot SAT/UNSAT results from the latest batch for one experiment mode.
 
-Important behavior:
-- The denominator in index (e.g. 241 in 110/241) is only the planned batch size.
-- The ACTUAL current batch size is the numerator on the newest/first valid row.
-  Example: if the newest row is 110/241, only numerators 1..110 are plotted.
-- For each numerator, only the newest result is kept. This prevents older appended
-  results from a previous run from being plotted with the current run.
+Modes are never mixed in a plot. Old summary rows without a mode are treated
+as full-mode rows.
 """
 
+import argparse
 import csv
 import os
 import statistics
@@ -19,6 +16,9 @@ from pathlib import Path
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+SAT_MODES = ("full", "baseline", "no_dlis", "no_backjump")
+PLOT_MODES = SAT_MODES + ("all",)
+SUMMARY_HEADER = ["timestamp", "index", "file", "vars", "clauses", "result", "time_ms", "mode"]
 
 
 def project_python():
@@ -49,57 +49,65 @@ import matplotlib.pyplot as plt
 
 csv_file = BASE_DIR / "results" / "summary.csv"
 out_dir = BASE_DIR / "results"
-
-
-rows = []
-with open(csv_file, newline="", encoding="utf-8") as f:
-    reader = csv.DictReader(f)
-    for file_order, r in enumerate(reader):
-        try:
-            idx = r["index"].strip()       # e.g. 110/241
-            num_s, denom_s = idx.split("/", 1)
-            num = int(num_s)
-            denom = int(denom_s)
-            rows.append({
-                "file": r["file"],
-                "timestamp": r["timestamp"],
-                "result": r["result"].strip().upper(),
-                "time": float(r["time_ms"]),
-                "num": num,
-                "denom": denom,
-                "file_order": file_order,
-            })
-        except Exception:
-            continue
-
-if not rows:
-    raise SystemExit(f"No valid rows found in {csv_file}")
-
-# The file is written newest-first in your current workflow. The first valid row
-# tells us how far the current/latest run got before plot_results.py was called.
-actual_batch_size = rows[0]["num"]
-planned_batch_size = rows[0]["denom"]
-
-# Keep only nums that belong to the latest partial batch, then keep the newest
-# row per numerator. Because the CSV is newest-first, the first time a numerator
-# is seen is the newest result for that numerator.
-latest_by_num = {}
-for r in rows:
-    if 1 <= r["num"] <= actual_batch_size and r["num"] not in latest_by_num:
-        latest_by_num[r["num"]] = r
-
-batch = [latest_by_num[n] for n in range(1, actual_batch_size + 1) if n in latest_by_num]
-batch = sorted(batch, key=lambda x: x["num"])
-
-sat = [r for r in batch if r["result"] == "SAT"]
-unsat = [r for r in batch if r["result"] == "UNSAT"]
-timeout = [r for r in batch if r["result"] not in ("SAT", "UNSAT")]
-
 generated = []
 
 
+def parse_args(argv):
+    parser = argparse.ArgumentParser(description="Plot SAT benchmark results by mode")
+    parser.add_argument("--mode", choices=PLOT_MODES, default="full")
+    return parser.parse_args(argv)
+
+
+def normalize_mode(row):
+    mode = row.get("mode", "")
+    mode = mode.strip() if mode is not None else ""
+    return mode or "full"
+
+
+def parse_summary_rows():
+    rows = []
+    with open(csv_file, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for file_order, r in enumerate(reader):
+            try:
+                idx = r["index"].strip()
+                num_s, denom_s = idx.split("/", 1)
+                num = int(num_s)
+                denom = int(denom_s)
+                rows.append({
+                    "file": r["file"],
+                    "timestamp": r["timestamp"],
+                    "result": r["result"].strip().upper(),
+                    "time": float(r["time_ms"]),
+                    "num": num,
+                    "denom": denom,
+                    "mode": normalize_mode(r),
+                    "file_order": file_order,
+                })
+            except Exception:
+                continue
+    return rows
+
+
+def latest_batch_for_mode(rows, mode):
+    mode_rows = [r for r in rows if r["mode"] == mode]
+    if not mode_rows:
+        return [], None, None
+
+    actual_batch_size = mode_rows[0]["num"]
+    planned_batch_size = mode_rows[0]["denom"]
+
+    latest_by_num = {}
+    for r in mode_rows:
+        if 1 <= r["num"] <= actual_batch_size and r["num"] not in latest_by_num:
+            latest_by_num[r["num"]] = r
+
+    batch = [latest_by_num[n] for n in range(1, actual_batch_size + 1) if n in latest_by_num]
+    batch = sorted(batch, key=lambda x: x["num"])
+    return batch, actual_batch_size, planned_batch_size
+
+
 def infer_timeout_ms(timeout_rows):
-    """Infer timeout from TIMEOUT/UNKNOWN rows and round to nearest second."""
     if not timeout_rows:
         return None, None
     seconds = [r["time"] / 1000.0 for r in timeout_rows if r["time"] > 0]
@@ -107,9 +115,6 @@ def infer_timeout_ms(timeout_rows):
         return None, None
     timeout_s = max(1, round(statistics.median(seconds)))
     return timeout_s * 1000, timeout_s
-
-
-timeout_ms, timeout_s = infer_timeout_ms(timeout)
 
 
 def build_log_ticks(times):
@@ -128,7 +133,7 @@ def build_log_ticks(times):
     return [x[0] for x in combined], [x[1] for x in combined]
 
 
-def make_plot(data, title, name):
+def make_plot(data, title, mode, name, actual_batch_size, planned_batch_size):
     if not data:
         return
 
@@ -147,7 +152,7 @@ def make_plot(data, title, name):
     ax.set_ylim(len(y) - 0.5, -0.5)
 
     ax.set_title(
-        f"{title}\nLatest batch: {actual_batch_size}/{planned_batch_size} completed",
+        f"{title} - {mode}\nLatest batch: {actual_batch_size}/{planned_batch_size} completed",
         fontsize=16,
         fontweight="bold",
         pad=2,
@@ -160,9 +165,6 @@ def make_plot(data, title, name):
     ax.set_xticks(ticks)
     ax.set_xticklabels(labels)
     ax.grid(True, axis="x", which="both")
-
-    #if timeout_ms is not None:
-    #    ax.axvline(timeout_ms, linestyle="--", linewidth=1)
 
     ax2 = ax.twinx()
     ax2.set_ylim(ax.get_ylim())
@@ -178,30 +180,104 @@ def make_plot(data, title, name):
     generated.append(out)
 
 
-def write_timeout(data):
+def write_timeout(data, mode, actual_batch_size, planned_batch_size, timeout_s):
     if not data:
         return
-    out = out_dir / "timeout_table.txt"
+
+    out = out_dir / f"timeout_table_{mode}.txt"
     with open(out, "w", encoding="utf-8") as f:
+        f.write(f"Mode: {mode}\n")
         f.write(f"Latest batch: {actual_batch_size}/{planned_batch_size} completed\n")
         if timeout_s is not None:
             f.write(f"Inferred timeout: {timeout_s} s\n")
         f.write("\n")
         for r in sorted(data, key=lambda x: x["num"]):
-            f.write(f"{r['index'] if 'index' in r else str(r['num']) + '/' + str(r['denom'])} {r['file']} {r['result']} {r['time']:.2f} ms {r['timestamp']}\n")
+            index = f"{r['num']}/{r['denom']}"
+            f.write(f"{index} {r['file']} {r['result']} {r['time']:.2f} ms {r['timestamp']}\n")
+
     generated.append(out)
 
 
-make_plot(sat, "Boolean Satisfied", "sat_plot.png")
-make_plot(unsat, "Boolean Unsatisfied", "unsat_plot.png")
-write_timeout(timeout)
+def plot_mode(rows, mode):
+    batch, actual_batch_size, planned_batch_size = latest_batch_for_mode(rows, mode)
+    if not batch:
+        print(f"No valid rows found for mode: {mode}")
+        return None
 
-for f in generated:
-    try:
-        os.startfile(f)  # Windows convenience; ignored elsewhere
-    except Exception:
-        pass
+    sat = [r for r in batch if r["result"] == "SAT"]
+    unsat = [r for r in batch if r["result"] == "UNSAT"]
+    timeout = [r for r in batch if r["result"] not in ("SAT", "UNSAT")]
+    timeout_ms, timeout_s = infer_timeout_ms(timeout)
 
-print(f"DONE - plotted latest batch: {actual_batch_size}/{planned_batch_size}")
-for f in generated:
-    print(f)
+    make_plot(sat, "Boolean Satisfied", mode, f"sat_plot_{mode}.png", actual_batch_size, planned_batch_size)
+    make_plot(unsat, "Boolean Unsatisfied", mode, f"unsat_plot_{mode}.png", actual_batch_size, planned_batch_size)
+    write_timeout(timeout, mode, actual_batch_size, planned_batch_size, timeout_s)
+
+    total_time = sum(r["time"] for r in batch)
+    return {
+        "mode": mode,
+        "total_rows": len(batch),
+        "sat_count": len(sat),
+        "unsat_count": len(unsat),
+        "timeout_count": len([r for r in batch if r["result"] == "TIMEOUT"]),
+        "unknown_count": len([r for r in batch if r["result"] not in ("SAT", "UNSAT", "TIMEOUT")]),
+        "total_time_ms": total_time,
+        "avg_time_ms": total_time / len(batch) if batch else 0,
+    }
+
+
+def write_mode_summary(summaries):
+    summaries = [s for s in summaries if s is not None]
+    if not summaries:
+        return
+
+    out = out_dir / "mode_summary.csv"
+    with open(out, "w", newline="", encoding="utf-8") as f:
+        fieldnames = [
+            "mode",
+            "total_rows",
+            "sat_count",
+            "unsat_count",
+            "timeout_count",
+            "unknown_count",
+            "total_time_ms",
+            "avg_time_ms",
+        ]
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for summary in summaries:
+            row = dict(summary)
+            row["total_time_ms"] = f"{row['total_time_ms']:.2f}"
+            row["avg_time_ms"] = f"{row['avg_time_ms']:.2f}"
+            writer.writerow(row)
+
+    generated.append(out)
+
+
+def main():
+    args = parse_args(sys.argv[1:])
+    rows = parse_summary_rows()
+    if not rows:
+        raise SystemExit(f"No valid rows found in {csv_file}")
+
+    if args.mode == "all":
+        modes_to_plot = SAT_MODES
+    else:
+        modes_to_plot = (args.mode,)
+
+    summaries = [plot_mode(rows, mode) for mode in modes_to_plot]
+    write_mode_summary(summaries)
+
+    for f in generated:
+        try:
+            os.startfile(f)
+        except Exception:
+            pass
+
+    print(f"DONE - plotted mode: {args.mode}")
+    for f in generated:
+        print(f)
+
+
+if __name__ == "__main__":
+    main()

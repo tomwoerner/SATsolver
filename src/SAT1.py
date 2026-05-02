@@ -22,6 +22,7 @@ or
 import sys
 import threading
 import time
+import argparse
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 import subprocess
@@ -31,6 +32,7 @@ from pathlib import Path
 TIME_LIMIT = 10
 SPINNER_CHARS = "/-\\|"
 SPINNER_INTERVAL = 0.20
+EXPERIMENT_MODES = ("full", "baseline", "no_dlis", "no_backjump")
 
 
 class CNFFormula:
@@ -177,11 +179,12 @@ def parse_dimacs_cnf(path):
 
 
 class SATSolver:
-    def __init__(self, formula: CNFFormula, start_time: float, time_limit: int):
+    def __init__(self, formula: CNFFormula, start_time: float, time_limit: int, config=None):
         self.n = formula.num_vars
         self.clauses: List[List[int]] = formula.clauses
         self.start_time = start_time
         self.time_limit = time_limit
+        self.config = config or {}
 
         self.assignment: List[int] = [-1] * (self.n + 1)  # -1 unassigned, 0 false, 1 true
         self.level_of_var: List[int] = [-1] * (self.n + 1)
@@ -447,18 +450,44 @@ def format_unsat_output() -> str:
     return "RESULT:UNSAT"
 
 
+def parse_args(argv):
+    parser = argparse.ArgumentParser(description="SAT solver for DIMACS CNF")
+    parser.add_argument("benchmark", help="DIMACS CNF benchmark path")
+    parser.add_argument("--mode", choices=EXPERIMENT_MODES, default="full")
+    return parser.parse_args(argv)
+
+
+def build_experiment_config(mode):
+    # AI-assisted infrastructure: command-line experiment toggle plumbing only.
+    # Solver algorithms and heuristic implementations are unchanged.
+    config = {
+        "mode": mode,
+        "use_dlis": mode not in ("baseline", "no_dlis"),
+        "use_backjump": mode not in ("baseline", "no_backjump"),
+    }
+    # TODO(manual solver work): SATSolver currently has no existing control
+    # points for disabling DLIS or backjumping, so all modes run full behavior.
+    return config
+
+
 def main() -> int:
     START_TIME = time.time()
     spinner = Spinner(START_TIME, TIME_LIMIT)
 
-    if len(sys.argv) != 2:
-        print("Usage: python3 SAT1.py benchmark.cnf", file=sys.stderr)
+    try:
+        args = parse_args(sys.argv[1:])
+    except SystemExit as exc:
+        return int(exc.code)
+
+    if args.mode not in EXPERIMENT_MODES:
         return 1
+
+    config = build_experiment_config(args.mode)
 
     spinner.start()
     try:
-        formula = parse_dimacs_cnf(sys.argv[1])
-        solver = SATSolver(formula, START_TIME, TIME_LIMIT)
+        formula = parse_dimacs_cnf(args.benchmark)
+        solver = SATSolver(formula, START_TIME, TIME_LIMIT, config)
 
         try:
             sat = solver.solve()
