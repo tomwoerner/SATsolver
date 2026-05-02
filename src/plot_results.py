@@ -13,14 +13,40 @@ Important behavior:
 import csv
 import os
 import statistics
+import subprocess
+import sys
 from pathlib import Path
+
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def project_python():
+    if sys.platform.startswith("win"):
+        candidate = BASE_DIR / "venv" / "Scripts" / "python.exe"
+    else:
+        candidate = BASE_DIR / "venv" / "bin" / "python"
+
+    if candidate.exists():
+        return candidate
+
+    return None
+
+
+venv_python = project_python()
+if venv_python is not None:
+    current_python = Path(sys.executable).resolve()
+    target_python = venv_python.resolve()
+    if str(current_python).lower() != str(target_python).lower():
+        raise SystemExit(
+            subprocess.call([str(target_python), str(Path(__file__).resolve())] + sys.argv[1:])
+        )
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
-BASE_DIR = Path(__file__).resolve().parent.parent
 csv_file = BASE_DIR / "results" / "summary.csv"
 out_dir = BASE_DIR / "results"
 

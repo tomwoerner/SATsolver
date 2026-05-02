@@ -3,7 +3,14 @@
 ## Setup (One Command)
 
 ### Linux / Mac
-bash setup.sh
+```bash
+unzip SATsolver-main.zip
+cd SATsolver-main
+chmod -R 777 .
+./setup.sh
+python3 src/run_all.py benchmarks/
+python3 src/plot_results.py
+```
 
 ### Windows (PowerShell)
 ./setup.ps1
