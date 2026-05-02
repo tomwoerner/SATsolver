@@ -19,12 +19,9 @@ or
     RESULT:UNSAT
 """
 
-from __future__ import annotations
-
 import sys
 import threading
 import time
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 import subprocess
@@ -36,10 +33,10 @@ SPINNER_CHARS = "/-\\|"
 SPINNER_INTERVAL = 0.20
 
 
-@dataclass
 class CNFFormula:
-    num_vars: int
-    clauses: List[List[int]]
+    def __init__(self, num_vars: int, clauses: List[List[int]]):
+        self.num_vars = num_vars
+        self.clauses = clauses
 
 def lit_var(lit: int) -> int:
     return abs(lit)
@@ -115,7 +112,7 @@ class Spinner:
             self.stop_event.wait(SPINNER_INTERVAL)
 
 
-def parse_dimacs_cnf(path: str | Path):
+def parse_dimacs_cnf(path):
     path = Path(path)
 
     num_vars = None

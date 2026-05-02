@@ -23,7 +23,7 @@ try:
 except:
     HAS_UNLZW = False
 
-def get_sat_timeout(sat1_path, default=30):
+def get_sat_timeout(sat1_path, default=10):
     with open(sat1_path, "r", encoding="utf-8") as f:
         for line in f:
             stripped = line.strip()
@@ -161,7 +161,8 @@ def write_summary_row(csv_path, row, retries=5, retry_delay=1.0):
             return True
         except PermissionError:
             try:
-                temp_path.unlink(missing_ok=True)
+                if temp_path.exists():
+                    temp_path.unlink()
             except OSError:
                 pass
 
@@ -229,7 +230,7 @@ def main():
         start = time.time()
 
         sat1_path = BASE / "src" / "SAT1.py"
-        TIME_LIMIT = get_sat_timeout(sat1_path)
+        sat_time_limit = get_sat_timeout(sat1_path)
         SAFETY_MARGIN = 5
 
         try:
@@ -237,8 +238,8 @@ def main():
                 [sys.executable, str(sat1_path), str(file)],
                 stdout=subprocess.PIPE,
                 stderr=None,
-                text=True,
-                timeout=TIME_LIMIT + SAFETY_MARGIN
+                universal_newlines=True,
+                timeout=sat_time_limit + SAFETY_MARGIN
             )
 
             out = proc.stdout
