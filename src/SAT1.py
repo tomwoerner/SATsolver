@@ -31,7 +31,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-TIME_LIMIT = 30
+TIME_LIMIT = 10
 SPINNER_CHARS = "/-\\|"
 SPINNER_INTERVAL = 0.20
 

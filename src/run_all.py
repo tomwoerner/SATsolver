@@ -23,12 +23,18 @@ try:
 except:
     HAS_UNLZW = False
 
-def get_sat_timeout(sat1_path):
+def get_sat_timeout(sat1_path, default=30):
     with open(sat1_path, "r", encoding="utf-8") as f:
         for line in f:
-            if line.strip().startswith("TIME_LIMIT"):
-                return int(line.split("=")[1].strip())
-    raise RuntimeError("TIME_LIMIT not found in SAT1.py")
+            stripped = line.strip()
+            if stripped.startswith("TIME_LIMIT"):
+                try:
+                    return int(stripped.split("=", 1)[1].strip())
+                except ValueError:
+                    break
+
+    print(f"WARNING: TIME_LIMIT not found in {sat1_path}; using default {default}s")
+    return default
 
 def open_stream(path: Path):
     if path.suffix == ".cnf":
@@ -140,14 +146,35 @@ def get_resume_state(csv_path, total_files):
     return min(top_current + 1, total_files + 1), completed_files
 
 
-def write_summary_row(csv_path, row):
+def write_summary_row(csv_path, row, retries=5, retry_delay=1.0):
     existing_rows = read_summary_rows(csv_path)
+    temp_path = csv_path.with_name(csv_path.name + ".tmp")
 
-    with open(csv_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(SUMMARY_HEADER)
-        writer.writerow(row)
-        writer.writerows(existing_rows)
+    for attempt in range(retries + 1):
+        try:
+            with open(temp_path, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(SUMMARY_HEADER)
+                writer.writerow(row)
+                writer.writerows(existing_rows)
+            temp_path.replace(csv_path)
+            return True
+        except PermissionError:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+            if attempt == retries:
+                print(
+                    f"ERROR: Could not update {csv_path}. "
+                    "Close the file if it is open in Excel or another program."
+                )
+                return False
+
+            time.sleep(retry_delay)
+
+    return False
 
 
 def main():
@@ -231,7 +258,7 @@ def main():
 
         elapsed = (time.time() - start) * 1000
 
-        write_summary_row(csv_path, [
+        wrote_summary = write_summary_row(csv_path, [
             datetime.now().isoformat(timespec="seconds"),
             f"{i}/{len(files)}",
             file.name,
@@ -240,6 +267,10 @@ def main():
             result,
             f"{elapsed:.2f}"
         ])
+
+        if not wrote_summary:
+            print("Stopping so completed benchmark rows are not lost.")
+            return
 
         print(f"   -> {result} ({elapsed:.1f} ms)")
 
