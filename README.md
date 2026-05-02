@@ -8,6 +8,7 @@ unzip SATsolver-main.zip
 cd SATsolver-main
 chmod -R 777 .
 ./setup.sh
+source venv/bin/activate
 python3 src/run_all.py benchmarks/
 python3 src/plot_results.py
 ```
@@ -49,6 +50,7 @@ python3 src/run_all.py benchmarks/ --continue
 After running benchmarks, you can generate a runtime plot:
 
 ```bash
+source venv/bin/activate
 python3 src/plot_results.py
 ```
 ---
