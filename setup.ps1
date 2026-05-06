@@ -6,5 +6,6 @@ Write-Host "Installing dependencies..."
 
 Write-Host "Setup complete!"
 Write-Host "You can now run:"
-Write-Host "  python src/run_all.py benchmarks/"
-Write-Host "  python src/plot_results.py"
+Write-Host "  python mySAT.py benchmarks/example.cnf"
+Write-Host "  python run_all.py benchmarks/"
+Write-Host "  python plot_results.py --mode full"

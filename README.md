@@ -40,6 +40,20 @@ venv\Scripts\activate
 python -m pip install -r requirements.txt
 ```
 
+Optional setup scripts are also included:
+
+```bash
+./setup.sh
+source venv/bin/activate
+```
+
+```powershell
+.\setup.ps1
+venv\Scripts\activate
+```
+
+The setup scripts create `venv` and install `requirements.txt`. Activate the virtual environment before running commands that need installed packages.
+
 ## Final Grading Command
 
 Run the solver from the project root:

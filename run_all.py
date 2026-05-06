@@ -25,7 +25,7 @@ except:
     HAS_UNLZW = False
 
 
-BASE = Path(__file__).resolve().parent.parent
+BASE = Path(__file__).resolve().parent
 
 
 def project_python():
@@ -40,7 +40,7 @@ def project_python():
     return sys.executable
 
 
-def get_sat_timeout(sat1_path, default=30):
+def get_sat_timeout(sat1_path, default=20):
     with open(sat1_path, "r", encoding="utf-8") as f:
         for line in f:
             stripped = line.strip()

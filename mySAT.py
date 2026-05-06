@@ -29,7 +29,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-TIME_LIMIT = 10
+TIME_LIMIT = 20
 SPINNER_CHARS = "/-\\|"
 SPINNER_INTERVAL = 0.20
 EXPERIMENT_MODES = ("full", "baseline", "no_dlis", "no_backjump")
