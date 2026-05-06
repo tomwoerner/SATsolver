@@ -22,7 +22,15 @@ Install Python dependencies from the project root:
 python3 -m pip install -r requirements.txt
 ```
 
-`mySAT.py` uses only the standard library for plain `.cnf` and `.cnf.gz` files. The `unlzw3` package is needed for `.cnf.Z` benchmark files.
+`.cnf` and `.cnf.gz` files work with the Python standard library. `.cnf.Z` files work with either the Python package `unlzw3` or a system decompression tool such as `uncompress` or `gunzip`.
+
+On Windows, the simplest `.cnf.Z` option is:
+
+```powershell
+python -m pip install unlzw3
+```
+
+On Linux/Purdue systems, `uncompress` or `gunzip` may already be available.
 
 Optional virtual environment:
 

@@ -23,10 +23,10 @@ import sys
 import threading
 import time
 import argparse
+import io
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 import subprocess
-import tempfile
 from pathlib import Path
 
 TIME_LIMIT = 20
@@ -50,9 +50,34 @@ def negate(lit: int) -> int:
     return -lit
 
 
+def read_compress_z_bytes(path: Path) -> bytes:
+    try:
+        from unlzw3 import unlzw
+        return unlzw(path.read_bytes())
+    except ImportError:
+        pass
+
+    for cmd in (["uncompress", "-c", str(path)], ["gunzip", "-c", str(path)]):
+        try:
+            proc = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+        except FileNotFoundError:
+            continue
+
+        if proc.returncode == 0 and proc.stdout:
+            return proc.stdout
+
+    raise RuntimeError(
+        f"Cannot decompress {path}. Install unlzw3 or make sure uncompress/gunzip is available."
+    )
+
+
 def open_cnf_file(path: Path):
     import gzip
-    import tempfile
 
     if path.suffix.lower() == ".cnf":
         return path.open("r", encoding="utf-8", errors="replace")
@@ -61,40 +86,9 @@ def open_cnf_file(path: Path):
         return gzip.open(path, "rt", encoding="utf-8", errors="replace")
 
     if path.suffix.lower() == ".z":
-        try:
-            from unlzw3 import unlzw
-        except ImportError:
-            base = Path(__file__).resolve().parent
-            if sys.platform.startswith("win"):
-                python_path = base / "venv" / "Scripts" / "python.exe"
-            else:
-                python_path = base / "venv" / "bin" / "python"
-
-            if not python_path.exists():
-                raise RuntimeError("pip install unlzw3")
-
-            proc = subprocess.run(
-                [
-                    str(python_path),
-                    "-c",
-                    "import sys; from unlzw3 import unlzw; sys.stdout.buffer.write(unlzw(open(sys.argv[1], 'rb').read()))",
-                    str(path),
-                ],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            if proc.returncode != 0:
-                raise RuntimeError("pip install unlzw3")
-            data = proc.stdout
-        else:
-            with open(path, "rb") as f:
-                data = unlzw(f.read())
-
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".cnf")
-        tmp.write(data)
-        tmp.close()
-
-        return Path(tmp.name).open("r", encoding="utf-8", errors="replace")
+        data = read_compress_z_bytes(path)
+        text = data.decode("utf-8", errors="replace")
+        return io.StringIO(text)
 
     raise ValueError(f"Unsupported file type: {path}")
 

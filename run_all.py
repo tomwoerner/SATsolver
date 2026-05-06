@@ -18,13 +18,6 @@ from pathlib import Path
 from datetime import datetime
 import gzip
 
-try:
-    from unlzw3 import unlzw
-    HAS_UNLZW = True
-except:
-    HAS_UNLZW = False
-
-
 BASE = Path(__file__).resolve().parent
 
 
@@ -53,28 +46,40 @@ def get_sat_timeout(sat1_path, default=20):
     print(f"WARNING: TIME_LIMIT not found in {sat1_path}; using default {default}s")
     return default
 
+
+def read_compress_z_bytes(path: Path) -> bytes:
+    try:
+        from unlzw3 import unlzw
+        return unlzw(path.read_bytes())
+    except ImportError:
+        pass
+
+    for cmd in (["uncompress", "-c", str(path)], ["gunzip", "-c", str(path)]):
+        try:
+            proc = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+        except FileNotFoundError:
+            continue
+
+        if proc.returncode == 0 and proc.stdout:
+            return proc.stdout
+
+    raise RuntimeError(
+        f"Cannot decompress {path}. Install unlzw3 or make sure uncompress/gunzip is available."
+    )
+
+
 def open_stream(path: Path):
     if path.suffix == ".cnf":
         return path.open("rt", encoding="utf-8", errors="replace")
     if path.suffix == ".gz":
         return gzip.open(path, "rt", encoding="utf-8", errors="replace")
     if path.suffix.lower() == ".z":
-        if HAS_UNLZW:
-            data = unlzw(path.read_bytes())
-        else:
-            proc = subprocess.run(
-                [
-                    project_python(),
-                    "-c",
-                    "import sys; from unlzw3 import unlzw; sys.stdout.buffer.write(unlzw(open(sys.argv[1], 'rb').read()))",
-                    str(path),
-                ],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            if proc.returncode != 0:
-                raise RuntimeError("pip install unlzw3")
-            data = proc.stdout
+        data = read_compress_z_bytes(path)
         return data.decode("utf-8", errors="replace").splitlines()
     raise ValueError("Unsupported format")
 
