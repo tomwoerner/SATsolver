@@ -233,7 +233,7 @@ def ensure_summary_header(csv_path):
 
 
 def parse_args(argv):
-    parser = argparse.ArgumentParser(description="Run SAT1.py over a benchmark directory")
+    parser = argparse.ArgumentParser(description="Run mySAT.py over a benchmark directory")
     parser.add_argument("benchmarks", help="benchmark directory")
     parser.add_argument("--resume", "--continue", action="store_true", dest="resume")
     parser.add_argument("--mode", choices=RUN_ALL_MODES, default="full")
@@ -262,7 +262,7 @@ def run_benchmarks_for_mode(files, csv_path, mode, resume):
 
         start = time.time()
 
-        sat1_path = BASE / "src" / "SAT1.py"
+        sat1_path = BASE / "mySAT.py"
         sat_time_limit = get_sat_timeout(sat1_path)
         SAFETY_MARGIN = 5
 

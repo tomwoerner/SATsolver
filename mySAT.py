@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SAT1.py
+mySAT.py
 
 A SAT solver for DIMACS CNF using:
 - DPLL
@@ -10,7 +10,7 @@ A SAT solver for DIMACS CNF using:
 - Simple non-chronological backtracking (backjumping)
 
 Usage:
-    python3 SAT1.py benchmark.cnf
+    python3 mySAT.py benchmark.cnf
 
 Output format:
     RESULT:SAT
@@ -64,7 +64,7 @@ def open_cnf_file(path: Path):
         try:
             from unlzw3 import unlzw
         except ImportError:
-            base = Path(__file__).resolve().parent.parent
+            base = Path(__file__).resolve().parent
             if sys.platform.startswith("win"):
                 python_path = base / "venv" / "Scripts" / "python.exe"
             else:

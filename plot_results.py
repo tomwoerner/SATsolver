@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(__file__).resolve().parent
 SAT_MODES = ("full", "baseline", "no_dlis", "no_backjump")
 PLOT_MODES = SAT_MODES + ("all",)
 SUMMARY_HEADER = ["timestamp", "index", "file", "vars", "clauses", "result", "time_ms", "mode"]
