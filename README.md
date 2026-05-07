@@ -110,7 +110,17 @@ python3 mySAT.py benchmark.cnf --mode no_dlis
 python3 mySAT.py benchmark.cnf --mode no_backjump
 ```
 
-Default mode is `full`. Mode support is infrastructure plumbing only until manual solver control points are added. `mySAT.py` does not accept `--mode all`; that expansion is only in `run_all.py`.
+
+## Experiment Modes
+
+Default mode is `full`. 
+`mySAT.py` accepts optional experiment modes for internal testing:
+
+```bash
+python3 mySAT.py benchmark.cnf --mode full
+python3 mySAT.py benchmark.cnf --mode baseline
+python3 mySAT.py benchmark.cnf --mode no_dlis
+python3 mySAT.py benchmark.cnf --mode no_backjump
 
 ## Benchmark Wrapper
 
